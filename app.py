@@ -114,18 +114,27 @@ with st.expander("ℹ️ RGB Bands Info"):
 st.header("🛰️ Satellite Image View")
 if st.session_state.submitted:
     st.info("Fetching satellite images for before and after...")
+    # Dynamically adjust thumbnail resolution
+    if region_option == "Custom Coordinates" and buffer_km <= 3:
+        thumb_scale = 3  # High-res
+    elif region_option == "Custom Coordinates" and buffer_km > 3 and buffer_km <= 5:
+        thumb_scale = 5  # High-res
+    elif region_option == "Custom Coordinates" and buffer_km > 5 and buffer_km <= 10:
+        thumb_scale = 7  # High-res
+    else:
+        thumb_scale = 10  # Default
 
     try:
         midpoint = start_date + (end_date - start_date) / 2
 
         before_img = get_composite_image(str(start_date), str(midpoint), region_geom)
         before_rgb = before_img.select(['B4', 'B3', 'B2']).visualize(min=100, max=3000, bands=['B4', 'B3', 'B2'])
-        before_url = get_rgb_thumbnail(before_rgb, region_geom)
+        before_url = get_rgb_thumbnail(before_rgb, region_geom, scale=thumb_scale, max_dim=1024)
         st.session_state.before_url = before_url
 
         after_img = get_composite_image(str(midpoint + timedelta(days=1)), str(end_date), region_geom)
         after_rgb = after_img.select(['B4', 'B3', 'B2']).visualize(min=100, max=3000, bands=['B4', 'B3', 'B2'])
-        after_url = get_rgb_thumbnail(after_rgb, region_geom)
+        after_url = get_rgb_thumbnail(after_rgb, region_geom, scale=thumb_scale, max_dim=1024)
         st.session_state.after_url = after_url
 
         # Display images side by side
@@ -133,6 +142,10 @@ if st.session_state.submitted:
         col1, col2 = st.columns(2)
         col1.image(before_url, caption=f"Before: {start_date} to {midpoint} {caption_suffix}", use_container_width=True)
         col2.image(after_url, caption=f"After: {midpoint} to {end_date} {caption_suffix}", use_container_width=True)
+        st.info(f"🖼️ Displayed images are compressed thumbnails (scale = {thumb_scale}). "
+        "Use the links below to download a higher-quality version.")
+        st.markdown(f"[📥 Download High-Res Before Image]({before_url})", unsafe_allow_html=True)
+        st.markdown(f"[📥 Download High-Res After Image]({after_url})", unsafe_allow_html=True)
 
     except Exception as e:
         st.error(f"Failed to fetch images: {e}")

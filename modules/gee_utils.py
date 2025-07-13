@@ -43,17 +43,18 @@ def get_composite_image(start_date, end_date, region_geom):
 # -------------------------
 # Generate Thumbnail URL (visualized image)
 # -------------------------
-def get_rgb_thumbnail(image, region_geom):
+def get_rgb_thumbnail(image, region_geom, scale=10, max_dim=1024):
     """
-    Returns a downloadable PNG thumbnail from a display-ready ee.Image using .visualize().
-    Assumes the image has already been visualized.
+    Returns a higher-resolution PNG thumbnail from an ee.Image.
     """
-    url = image.getThumbURL({
+    return image.getThumbURL({
         'region': region_geom,
-        'scale': 50,  # Sentinel-2 RGB resolution
-        'format': 'png'
+        'scale': scale,
+        'format': 'png',
+        'maxDimension': max_dim
     })
     return url
+
 
 def classify_and_summarize(image, region_geom, n_clusters=4):
     """
