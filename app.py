@@ -41,14 +41,26 @@ region_option = st.sidebar.selectbox(
 )
 
 # Default location: EKSU Environs
+eksu_lat = 7.720720
+eksu_lon = 5.260590
+eksu_buffer_km = 2.0
+eksu_delta = eksu_buffer_km / 111.0  # Convert km to degrees
+
 region_geom = ee.Geometry.Polygon([
-    [[5.2772, 7.7326], [5.2772, 7.7500], [5.2950, 7.7500], [5.2950, 7.7326], [5.2772, 7.7326]]
+    [
+        [eksu_lon - eksu_delta, eksu_lat - eksu_delta],
+        [eksu_lon - eksu_delta, eksu_lat + eksu_delta],
+        [eksu_lon + eksu_delta, eksu_lat + eksu_delta],
+        [eksu_lon + eksu_delta, eksu_lat - eksu_delta],
+        [eksu_lon - eksu_delta, eksu_lat - eksu_delta]
+    ]
 ])
-caption_suffix = ""  # Default caption suffix
+caption_suffix = "(Buffer: 2 km)"  # Displayed under thumbnails
+
 
 if region_option == "Custom Coordinates":
-    lat = st.sidebar.number_input("Latitude", value=7.7380, format="%.6f")
-    lon = st.sidebar.number_input("Longitude", value=5.2860, format="%.6f")
+    lat = st.sidebar.number_input("Latitude", value=7.720720, format="%.6f")
+    lon = st.sidebar.number_input("Longitude", value=5.260590, format="%.6f")
 
     buffer_km = st.sidebar.number_input("Buffer Radius (km)", value=3.0, min_value=0.1, max_value=10.0, step=0.1)
     delta = buffer_km / 111.0  # Convert km to approximate degrees
@@ -67,7 +79,7 @@ if region_option == "Custom Coordinates":
 # Date Range Input
 st.sidebar.subheader("Select Time Range")
 start_date = st.sidebar.date_input("Start Date", value=date(2015, 6, 30), min_value=date(2015, 6, 30))
-end_date = st.sidebar.date_input("End Date", value=date(2023, 1, 1))
+end_date = st.sidebar.date_input("End Date", value=date(2023, 12, 31))
 
 if start_date < date(2015, 6, 30):
     st.sidebar.warning("Sentinel-2 data is only available from June 30, 2015 onward.")
@@ -113,7 +125,6 @@ with st.expander("ℹ️ RGB Bands Info"):
 # Section 1: Map/Imagery Output
 st.header("🛰️ Satellite Image View")
 if st.session_state.submitted:
-    st.info("Fetching satellite images for before and after...")
     # Dynamically adjust thumbnail resolution
     if region_option == "Custom Coordinates" and buffer_km <= 3:
         thumb_scale = 3  # High-res
@@ -125,20 +136,21 @@ if st.session_state.submitted:
         thumb_scale = 10  # Default
 
     try:
-        midpoint = start_date + (end_date - start_date) / 2
+        with st.spinner("🛰️ Fetching satellite images..."):
+            midpoint = start_date + (end_date - start_date) / 2
 
-        before_img = get_composite_image(str(start_date), str(midpoint), region_geom)
-        before_rgb = before_img.select(['B4', 'B3', 'B2']).visualize(min=100, max=3000, bands=['B4', 'B3', 'B2'])
-        before_url = get_rgb_thumbnail(before_rgb, region_geom, scale=thumb_scale, max_dim=1024)
-        st.session_state.before_url = before_url
+            before_img = get_composite_image(str(start_date), str(midpoint), region_geom)
+            before_rgb = before_img.select(['B4', 'B3', 'B2']).visualize(min=100, max=3000, bands=['B4', 'B3', 'B2'])
+            before_url = get_rgb_thumbnail(before_rgb, region_geom)
+            st.session_state.before_url = before_url
 
-        after_img = get_composite_image(str(midpoint + timedelta(days=1)), str(end_date), region_geom)
-        after_rgb = after_img.select(['B4', 'B3', 'B2']).visualize(min=100, max=3000, bands=['B4', 'B3', 'B2'])
-        after_url = get_rgb_thumbnail(after_rgb, region_geom, scale=thumb_scale, max_dim=1024)
-        st.session_state.after_url = after_url
+            after_img = get_composite_image(str(midpoint + timedelta(days=1)), str(end_date), region_geom)
+            after_rgb = after_img.select(['B4', 'B3', 'B2']).visualize(min=100, max=3000, bands=['B4', 'B3', 'B2'])
+            after_url = get_rgb_thumbnail(after_rgb, region_geom)
+            st.session_state.after_url = after_url
 
         # Display images side by side
-        st.success("Images fetched successfully!")
+        st.success("✅ Images fetched successfully!")
         col1, col2 = st.columns(2)
         col1.image(before_url, caption=f"Before: {start_date} to {midpoint} {caption_suffix}", use_container_width=True)
         col2.image(after_url, caption=f"After: {midpoint} to {end_date} {caption_suffix}", use_container_width=True)
@@ -153,16 +165,14 @@ if st.session_state.submitted:
 # Section 2: Change Detection Summary
 if st.session_state.submitted and 'before_img' in locals() and 'after_img' in locals():
     try:
-        st.info("Running unsupervised classification for change detection...")
-
         n_clusters = 4  # Consistent cluster count used across classification and visualization
+        with st.spinner("🔍 Running unsupervised classification..."):
+            before_summary, before_clustered = classify_and_summarize(before_img, region_geom, n_clusters=n_clusters)
+            st.session_state.before_summary = before_summary
+            after_summary, after_clustered = classify_and_summarize(after_img, region_geom, n_clusters=n_clusters)
+            st.session_state.after_summary = after_summary
 
-        before_summary, before_clustered = classify_and_summarize(before_img, region_geom, n_clusters=n_clusters)
-        st.session_state.before_summary = before_summary
-        after_summary, after_clustered = classify_and_summarize(after_img, region_geom, n_clusters=n_clusters)
-        st.session_state.after_summary = after_summary
-
-        st.success("Classification completed!")
+        st.success("✅ Classification completed!")
 
         st.subheader("🖼️ Cluster Visualization")
 
@@ -176,6 +186,16 @@ if st.session_state.submitted and 'before_img' in locals() and 'after_img' in lo
         before_thumb = get_rgb_thumbnail(before_vis, region_geom)
         after_thumb = get_rgb_thumbnail(after_vis, region_geom)
 
+        # Save high-res classification thumbnails for report
+        before_cluster_filename = "before_cluster.png"
+        after_cluster_filename = "after_cluster.png"
+
+        save_image_from_url(before_thumb, before_cluster_filename)
+        save_image_from_url(after_thumb, after_cluster_filename)
+
+        # Store for report generation
+        st.session_state.before_cluster_img = before_cluster_filename
+        st.session_state.after_cluster_img = after_cluster_filename
 
         # Side-by-side display
         col1, col2 = st.columns(2)
@@ -246,32 +266,45 @@ if st.button("Generate Report PDF"):
 
 if st.session_state.generate_pdf:
     try:
-        metadata = {
-            "Region": region_option,
-            "Buffer (km)": buffer_km if region_option == "Custom Coordinates" else "N/A",
-            "Start Date": start_date,
-            "End Date": end_date
-        }
+        with st.spinner("📄 Generating PDF report..."):    
+            # Helper to format date
+            def format_date(d):
+                return d.strftime("%B %d, %Y")
 
-        summary_structured = {
-            "clusters": {
-                k: {
-                    "before": st.session_state.before_summary.get(k, 0),
-                    "after": st.session_state.after_summary.get(k, 0),
-                    "change": round(st.session_state.after_summary.get(k, 0) - st.session_state.before_summary.get(k, 0), 2),
-                    "percent": round(((st.session_state.after_summary.get(k, 0) - st.session_state.before_summary.get(k, 0)) / st.session_state.before_summary.get(k, 0)) * 100, 2)
-                    if st.session_state.before_summary.get(k, 0) != 0 else 0
-                } for k in sorted(set(st.session_state.before_summary) | set(st.session_state.after_summary))
+            # Format metadata nicely
+            formatted_buffer = (
+                f"{int(buffer_km)} km" if buffer_km == int(buffer_km)
+                else f"{buffer_km:.1f} km"
+            ) if region_option == "Custom Coordinates" else "N/A"
+
+            metadata = {
+                "Region": region_option,
+                "Buffer Radius": formatted_buffer,
+                "Start Date": format_date(start_date),
+                "End Date": format_date(end_date)
             }
-        }
 
-        # Save the images
-        save_image_from_url(st.session_state.before_url, "before.png")
-        save_image_from_url(st.session_state.after_url, "after.png")
-        fig_image.write_image("chart.png")
 
-        from modules.report_utils import generate_pdf_report
-        generate_pdf_report("before.png", "after.png", summary_structured, "chart.png", "report.pdf", metadata)
+            summary_structured = {
+                "clusters": {
+                    k: {
+                        "before": st.session_state.before_summary.get(k, 0),
+                        "after": st.session_state.after_summary.get(k, 0),
+                        "change": round(st.session_state.after_summary.get(k, 0) - st.session_state.before_summary.get(k, 0), 2),
+                        "percent": round(((st.session_state.after_summary.get(k, 0) - st.session_state.before_summary.get(k, 0)) / st.session_state.before_summary.get(k, 0)) * 100, 2)
+                        if st.session_state.before_summary.get(k, 0) != 0 else 0
+                    } for k in sorted(set(st.session_state.before_summary) | set(st.session_state.after_summary))
+                }
+            }
+
+            # Save the images
+            save_image_from_url(st.session_state.before_url, "before.png")
+            save_image_from_url(st.session_state.after_url, "after.png")
+            fig_image.write_image("chart.png")
+
+            from modules.report_utils import generate_pdf_report
+            generate_pdf_report("before.png", "after.png", summary_structured, "chart.png", "report.pdf", metadata, st.session_state.before_cluster_img, st.session_state.after_cluster_img)
+        st.success("✅ Report ready for download!")
 
         with open("report.pdf", "rb") as f:
             st.download_button("📄 Download PDF Report", f, file_name="LULC_Report.pdf")
