@@ -1,6 +1,9 @@
 import streamlit as st
 import pandas as pd
 import plotly.graph_objects as go
+import folium
+from streamlit_folium import st_folium
+from folium.plugins import Draw
 from datetime import date, timedelta
 from modules.gee_utils import get_composite_image, get_rgb_thumbnail, classify_and_summarize
 import ee
@@ -32,12 +35,13 @@ st.set_page_config(
 
 # -------------------- Sidebar --------------------
 st.sidebar.title("Input Parameters")
+st.sidebar.markdown("---")
 
 # Location Input
 st.sidebar.subheader("Select Region")
 region_option = st.sidebar.selectbox(
-    "Choose a predefined region:",
-    ["EKSU Environs", "Custom Coordinates"]
+    "🗺️ Define Your Area of Interest:",
+    ["EKSU Environs (predefined)", "Custom Coordinates"]
 )
 
 # Default location: EKSU Environs
@@ -76,21 +80,16 @@ if region_option == "Custom Coordinates":
     ])
     caption_suffix = f"(Buffer: {buffer_km} km)"
 
+st.sidebar.markdown("### Or use interactive map to select a region")
+st.sidebar.markdown("---")
+
 # Date Range Input
-st.sidebar.subheader("Select Time Range")
+st.sidebar.subheader("📅 Set Time Range")
 start_date = st.sidebar.date_input("Start Date", value=date(2015, 6, 30), min_value=date(2015, 6, 30))
 end_date = st.sidebar.date_input("End Date", value=date(2023, 12, 31))
 
 if start_date < date(2015, 6, 30):
     st.sidebar.warning("Sentinel-2 data is only available from June 30, 2015 onward.")
-
-# Submission button
-if "submitted" not in st.session_state:
-    st.session_state.submitted = False
-
-if st.sidebar.button("Run Analysis"):
-    st.session_state.submitted = True
-    st.session_state.generate_pdf = False  # reset report trigger
 
 
 # -------------------- Main Page --------------------
@@ -102,25 +101,46 @@ st.markdown(
     Start by selecting a region and date range from the sidebar.
     """
 )
+st.markdown("---")
+
+with st.expander("Interactive Map AOI Selector"):
+    st.markdown("Use the drawing tool to define a polygon for your area of interest. (this will override coordinate input)")
+
+    # Set map center based on default or current values
+    center_lat = 7.720720
+    center_lon = 5.260590
+    m = folium.Map(location=[center_lat, center_lon], zoom_start=15)
+
+    # Add drawing tools
+    Draw(export=True, filename='drawn.geojson').add_to(m)
+
+    # Render map and get draw data
+    map_data = st_folium(m, width=700, height=450)
+
+    # Parse geometry
+    drawn_geom = None
+    if map_data and map_data.get("last_active_drawing"):
+        coords = map_data["last_active_drawing"]["geometry"]["coordinates"][0]
+        drawn_geom = ee.Geometry.Polygon(coords)
+
+        # Override region_geom if user drew something
+        region_geom = drawn_geom
+        caption_suffix = "(Custom Map-drawn Area)"
+        st.success("✅ Map-drawn area is active, sidebar coordinates will be ignored. Please proceed to select a time range on the sidebar.")
+
+
+# -------------------- Run Analysis Button --------------------
+if "submitted" not in st.session_state:
+    st.session_state.submitted = False
+
+st.markdown("✅ When ready, click below to run the analysis")
+if st.button("🚀 Run Analysis"):
+    st.session_state.submitted = True
+    st.session_state.generate_pdf = False  # reset report trigger
+    st.success("Analysis started! Please wait for the results to load.")
 
 # Add spacing
 st.markdown("---")
-
-# Show selected coordinates
-if region_option == "Custom Coordinates":
-    st.info(f"📍 Custom Location Selected:\n- Latitude = `{lat}`\n- Longitude = `{lon}`\n- Buffer = `{buffer_km} km`")
-else:
-    st.info("📍 Region: EKSU Environs (predefined)")
-
-# RGB Band Legend
-with st.expander("ℹ️ RGB Bands Info"):
-    st.markdown("""
-    **Sentinel-2 RGB Composite**
-    - **B4** = Red  
-    - **B3** = Green  
-    - **B2** = Blue  
-    This true-color visualization simulates how the human eye sees the landscape.
-    """)
 
 # Section 1: Map/Imagery Output
 st.header("🛰️ Satellite Image View")
